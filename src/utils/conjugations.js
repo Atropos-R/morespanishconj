@@ -1,253 +1,182 @@
-// Fetches and parses Spanish verb conjugations from Wiktionary
-
-const WIKTIONARY_API = 'https://en.wiktionary.org/api/rest_v1/page/html/'
+import conjugateVerb from './conjugateVerb.js'
 
 export const TENSES = {
-  presente: { label: 'Presente', group: 'Indicativo' },
-  preterito_indefinido: { label: 'Pretérito Indefinido', group: 'Indicativo' },
-  preterito_imperfecto: { label: 'Pretérito Imperfecto', group: 'Indicativo' },
-  futuro: { label: 'Futuro', group: 'Indicativo' },
-  condicional: { label: 'Condicional', group: 'Indicativo' },
-  preterito_perfecto: { label: 'Pretérito Perfecto', group: 'Indicativo' },
-  pluscuamperfecto: { label: 'Pluscuamperfecto', group: 'Indicativo' },
-  futuro_perfecto: { label: 'Futuro Perfecto', group: 'Indicativo' },
-  subjuntivo_presente: { label: 'Presente', group: 'Subjuntivo' },
+  presente:              { label: 'Presente',           group: 'Indicativo' },
+  preterito_indefinido:  { label: 'Pretérito Indefinido', group: 'Indicativo' },
+  preterito_imperfecto:  { label: 'Pretérito Imperfecto', group: 'Indicativo' },
+  futuro:                { label: 'Futuro',              group: 'Indicativo' },
+  condicional:           { label: 'Condicional',         group: 'Indicativo' },
+  preterito_perfecto:    { label: 'Pretérito Perfecto',  group: 'Indicativo' },
+  pluscuamperfecto:      { label: 'Pluscuamperfecto',    group: 'Indicativo' },
+  futuro_perfecto:       { label: 'Futuro Perfecto',     group: 'Indicativo' },
+  subjuntivo_presente:   { label: 'Presente',            group: 'Subjuntivo' },
   subjuntivo_imperfecto: { label: 'Pretérito Imperfecto', group: 'Subjuntivo' },
-  subjuntivo_futuro: { label: 'Futuro', group: 'Subjuntivo' },
-  imperativo_afirmativo: { label: 'Afirmativo', group: 'Imperativo' },
-  imperativo_negativo: { label: 'Negativo', group: 'Imperativo' },
+  subjuntivo_futuro:     { label: 'Futuro',              group: 'Subjuntivo' },
+  imperativo_afirmativo: { label: 'Afirmativo',          group: 'Imperativo' },
+  imperativo_negativo:   { label: 'Negativo',            group: 'Imperativo' },
 }
 
 export const PERSONS = [
-  { key: 'yo', label: 'yo' },
-  { key: 'tu', label: 'tú' },
-  { key: 'el', label: 'él/ella/Ud.' },
+  { key: 'yo',       label: 'yo' },
+  { key: 'tu',       label: 'tú' },
+  { key: 'el',       label: 'él/ella/Ud.' },
   { key: 'nosotros', label: 'nosotros' },
   { key: 'vosotros', label: 'vosotros' },
-  { key: 'ellos', label: 'ellos/Uds.' },
+  { key: 'ellos',    label: 'ellos/Uds.' },
 ]
 
-// Map Wiktionary table headers to our tense keys
-// Wiktionary uses specific header text in the conjugation tables
-const WIKTIONARY_TENSE_MAP = {
-  // Indicative
-  'present': 'presente',
-  'preterite': 'preterito_indefinido',
-  'imperfect': 'preterito_imperfecto',
-  'future': 'futuro',
-  'conditional': 'condicional',
-  'present perfect': 'preterito_perfecto',
-  'past perfect': 'pluscuamperfecto',
-  'future perfect': 'futuro_perfecto',
-  // Subjunctive
-  'present subjunctive': 'subjuntivo_presente',
-  'imperfect subjunctive': 'subjuntivo_imperfecto',
-  'future subjunctive': 'subjuntivo_futuro',
-  // Imperative
-  'affirmative imperative': 'imperativo_afirmativo',
-  'negative imperative': 'imperativo_negativo',
+function stripExclamation(s) {
+  return s ? s.replace(/[¡!]/g, '').trim() : null
 }
 
-const WIKTIONARY_PERSON_ORDER = ['yo', 'tu', 'el', 'nosotros', 'vosotros', 'ellos']
+// Map conjugator's output structure to our flat format
+function mapConjugations(raw) {
+  const r = {}
 
-function cleanText(text) {
-  return text?.replace(/\s+/g, ' ').trim() || ''
+  const pick = (obj, ...keys) => {
+    for (const k of keys) {
+      if (obj && obj[k] !== undefined) return obj[k]
+    }
+    return null
+  }
+
+  const ind = raw?.indicative || {}
+  const sub = raw?.subjunctive || {}
+  const con = raw?.conditional || {}
+  const imp = raw?.imperative || {}
+
+  // Helper: extract 6 person forms from a tense object {singular:{first,second,third}, plural:{first,second,third}}
+  const forms = (t) => t ? {
+    yo:       pick(t, 'singular')?.first  || null,
+    tu:       pick(t, 'singular')?.second || null,
+    el:       pick(t, 'singular')?.third  || null,
+    nosotros: pick(t, 'plural')?.first    || null,
+    vosotros: pick(t, 'plural')?.second   || null,
+    ellos:    pick(t, 'plural')?.third    || null,
+  } : null
+
+  r.presente             = forms(ind.present)
+  r.preterito_indefinido = forms(ind.preterite)
+  r.preterito_imperfecto = forms(ind.imperfect)
+  r.futuro               = forms(ind.future)
+  r.condicional          = forms(con.present || con.future)
+  r.preterito_perfecto   = forms(ind.perfect)
+  r.pluscuamperfecto     = forms(ind.pluperfect)
+  r.futuro_perfecto      = forms(ind['future perfect'])
+
+  r.subjuntivo_presente   = forms(sub.present)
+  // Prefer -ra form for imperfect subjunctive
+  r.subjuntivo_imperfecto = forms(sub['imperfect -ra'] || sub['imperfect -se'] || sub.imperfect)
+  r.subjuntivo_futuro     = forms(sub.future)
+
+  // Imperative only has some persons
+  const affirmative = imp?.affirmative
+  const negative    = imp?.negative
+  r.imperativo_afirmativo = affirmative ? {
+    yo:       null,
+    tu:       stripExclamation(affirmative?.singular?.second),
+    el:       stripExclamation(affirmative?.singular?.third),
+    nosotros: stripExclamation(affirmative?.plural?.first),
+    vosotros: stripExclamation(affirmative?.plural?.second),
+    ellos:    stripExclamation(affirmative?.plural?.third),
+  } : null
+  r.imperativo_negativo = negative ? {
+    yo:       null,
+    tu:       stripExclamation(negative?.singular?.second),
+    el:       stripExclamation(negative?.singular?.third),
+    nosotros: stripExclamation(negative?.plural?.first),
+    vosotros: stripExclamation(negative?.plural?.second),
+    ellos:    stripExclamation(negative?.plural?.third),
+  } : null
+
+  // Remove nulls from tenses that have no forms at all
+  for (const tense of Object.keys(r)) {
+    if (!r[tense]) { r[tense] = {}; continue }
+    const hasAny = Object.values(r[tense]).some(v => v !== null)
+    if (!hasAny) r[tense] = {}
+  }
+
+  return r
 }
 
-function stripParenthetical(text) {
-  // Remove things like "(yo)" prefixes Wiktionary sometimes adds
-  return text.replace(/^\(.*?\)\s*/, '').trim()
+// Validate a verb exists by checking Wiktionary definition API
+// (lightweight — just checks the page exists and has a Spanish verb entry)
+async function validateVerb(infinitive) {
+  try {
+    const res = await fetch(
+      `https://en.wiktionary.org/api/rest_v1/page/definition/${encodeURIComponent(infinitive)}`
+    )
+    if (!res.ok) return false
+    const data = await res.json()
+    const spanish = data.es || data.ES
+    if (!spanish) return false
+    return spanish.some(e => e.partOfSpeech?.toLowerCase().includes('verb'))
+  } catch {
+    // If Wiktionary is unreachable, allow through (conjugator will handle it)
+    return true
+  }
 }
 
 export async function fetchConjugations(infinitive) {
-  const url = `${WIKTIONARY_API}${encodeURIComponent(infinitive)}`
-  
+  const verb = infinitive.trim().toLowerCase()
+
+  // Validate verb exists
+  const valid = await validateVerb(verb)
+  if (!valid) {
+    throw new Error(`"${verb}" doesn't appear to be a Spanish verb. Check the spelling.`)
+  }
+
+  // Conjugate locally — instant, offline, handles irregulars
+  let raw
   try {
-    const response = await fetch(url, {
-      headers: { 'Accept': 'text/html' }
-    })
-    
-    if (!response.ok) {
-      throw new Error(`Verb "${infinitive}" not found on Wiktionary`)
-    }
-    
-    const html = await response.text()
-    const parser = new DOMParser()
-    const doc = parser.parseFromString(html, 'text/html')
-    
-    return parseConjugationTables(doc, infinitive)
+    raw = conjugateVerb(verb, 'es')
   } catch (e) {
-    throw new Error(`Could not fetch conjugations for "${infinitive}": ${e.message}`)
-  }
-}
-
-function parseConjugationTables(doc, infinitive) {
-  const result = {}
-  
-  // Initialize all tenses
-  Object.keys(TENSES).forEach(tense => {
-    result[tense] = {}
-    PERSONS.forEach(p => { result[tense][p.key] = null })
-  })
-
-  // Find the Spanish section first
-  let spanishSection = null
-  const headers = doc.querySelectorAll('h2')
-  for (const h of headers) {
-    if (h.textContent.trim() === 'Spanish') {
-      spanishSection = h
-      break
-    }
+    throw new Error(`Could not conjugate "${verb}": ${e.message}`)
   }
 
-  if (!spanishSection) {
-    throw new Error(`No Spanish entry found for "${infinitive}"`)
-  }
+  const conjugations = mapConjugations(raw)
 
-  // Collect all tables after the Spanish section heading
-  const tables = []
-  let el = spanishSection.nextElementSibling
-  while (el) {
-    if (el.tagName === 'H2') break // hit next language
-    if (el.tagName === 'TABLE' || el.querySelector('table')) {
-      const tbl = el.tagName === 'TABLE' ? el : el.querySelector('table')
-      if (tbl) tables.push(tbl)
-    }
-    el = el.nextElementSibling
-  }
-
-  if (tables.length === 0) {
-    // fallback: grab all tables anywhere and look for conjugation ones
-    doc.querySelectorAll('table').forEach(t => tables.push(t))
-  }
-
-  for (const table of tables) {
-    parseTable(table, result)
-  }
-
-  // Validate we got something
-  const hasData = Object.values(result).some(tense =>
-    Object.values(tense).some(v => v !== null)
+  // Sanity check
+  const hasData = Object.values(conjugations).some(t =>
+    Object.values(t).some(v => v !== null)
   )
-  
   if (!hasData) {
-    throw new Error(`Could not parse conjugation table for "${infinitive}". The verb may not have a standard conjugation table on Wiktionary.`)
+    throw new Error(`No conjugation data found for "${verb}"`)
   }
 
-  return result
+  return conjugations
 }
 
-function parseTable(table, result) {
-  const rows = Array.from(table.querySelectorAll('tr'))
-  if (rows.length < 2) return
-
-  // Try to identify what tenses this table section covers
-  // Wiktionary uses th elements with colspan for section headers
-  let currentTenseKey = null
-  let personIndex = 0
-
-  // Look for a caption or header row identifying the tense
-  const caption = table.querySelector('caption')
-  if (caption) {
-    const capText = cleanText(caption.textContent).toLowerCase()
-    for (const [wikKey, ourKey] of Object.entries(WIKTIONARY_TENSE_MAP)) {
-      if (capText.includes(wikKey)) {
-        currentTenseKey = ourKey
-        break
-      }
-    }
-  }
-
-  // Parse row by row
-  for (const row of rows) {
-    const cells = Array.from(row.querySelectorAll('th, td'))
-    if (cells.length === 0) continue
-
-    const firstCell = cleanText(cells[0].textContent).toLowerCase()
-
-    // Check if this is a tense header row
-    let matchedTense = null
-    for (const [wikKey, ourKey] of Object.entries(WIKTIONARY_TENSE_MAP)) {
-      if (firstCell.includes(wikKey)) {
-        matchedTense = ourKey
-        break
-      }
-    }
-
-    if (matchedTense) {
-      currentTenseKey = matchedTense
-      personIndex = 0
-      continue
-    }
-
-    // Check if this is a person row (has a conjugation value)
-    if (currentTenseKey && personIndex < 6) {
-      // The last td cell usually contains the conjugation
-      const dataCells = row.querySelectorAll('td')
-      if (dataCells.length > 0) {
-        const lastCell = dataCells[dataCells.length - 1]
-        const rawText = cleanText(lastCell.textContent)
-        
-        // Could be comma-separated (e.g. "hablé, hablaste" in some layouts)
-        // Take the first form
-        const forms = rawText.split(',').map(s => stripParenthetical(s.trim())).filter(Boolean)
-        
-        if (forms.length > 0 && forms[0].length > 0 && forms[0].length < 30) {
-          const personKey = WIKTIONARY_PERSON_ORDER[personIndex]
-          if (personKey && result[currentTenseKey]) {
-            result[currentTenseKey][personKey] = forms[0]
-          }
-          personIndex++
-        }
-      }
-    }
-  }
-}
-
-// Normalize accent for lenient checking
-export function normalizeAccents(str) {
-  return str
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-    .trim()
-}
-
-export function checkAnswer(input, correct, strict = true) {
-  const cleanInput = input.trim()
-  const cleanCorrect = correct.trim()
-  
-  if (cleanInput === cleanCorrect) return 'correct'
-  
-  if (!strict && normalizeAccents(cleanInput) === normalizeAccents(cleanCorrect)) {
-    return 'accent_error'
-  }
-  
-  return 'wrong'
-}
-
-// Fetch English definition for a verb from Wiktionary dictionary API
+// Fetch English definition
 export async function fetchDefinition(infinitive) {
   try {
-    const res = await fetch(`https://en.wiktionary.org/api/rest_v1/page/definition/${encodeURIComponent(infinitive)}`)
+    const res = await fetch(
+      `https://en.wiktionary.org/api/rest_v1/page/definition/${encodeURIComponent(infinitive)}`
+    )
     if (!res.ok) return null
     const data = await res.json()
-    
-    // Look in Spanish section
     const spanish = data.es || data.ES
     if (!spanish) return null
-    
     for (const entry of spanish) {
       if (entry.partOfSpeech?.toLowerCase().includes('verb')) {
         const def = entry.definitions?.[0]?.definition
-        if (def) {
-          // Strip HTML tags
-          return def.replace(/<[^>]+>/g, '').trim()
-        }
+        if (def) return def.replace(/<[^>]+>/g, '').trim()
       }
     }
     return null
   } catch {
     return null
   }
+}
+
+export function normalizeAccents(str) {
+  return str.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim()
+}
+
+export function checkAnswer(input, correct, strict = true) {
+  const a = input.trim()
+  const b = correct.trim()
+  if (a === b) return 'correct'
+  if (!strict && normalizeAccents(a) === normalizeAccents(b)) return 'accent_error'
+  return 'wrong'
 }
