@@ -14,6 +14,7 @@ function buildQueue(verbs, enabledTenses, enabledPersons) {
         if (form && form.trim()) {
           queue.push({
             infinitive: verb.infinitive,
+            definition: verb.definition || null,
             tenseKey,
             personKey: person.key,
             personLabel: person.label,
@@ -23,7 +24,6 @@ function buildQueue(verbs, enabledTenses, enabledPersons) {
       }
     }
   }
-  // Shuffle
   for (let i = queue.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
     [queue[i], queue[j]] = [queue[j], queue[i]]
@@ -35,11 +35,11 @@ export default function Trainer({ verbs, loading, enabledTenses, enabledPersons,
   const [queue, setQueue] = useState([])
   const [index, setIndex] = useState(0)
   const [input, setInput] = useState('')
-  const [feedback, setFeedback] = useState(null) // null | 'correct' | 'accent_error' | 'wrong'
+  const [feedback, setFeedback] = useState(null)
   const [correctAnswer, setCorrectAnswer] = useState(null)
   const [streak, setStreak] = useState(0)
-  const [sessionStats, setSessionStats] = useState({ correct: 0, wrong: 0, total: 0 })
-  const [showAnswer, setShowAnswer] = useState(false)
+  const [sessionStats, setSessionStats] = useState({ correct: 0, wrong: 0 })
+  const [waitingForEnter, setWaitingForEnter] = useState(false)
   const inputRef = useRef(null)
 
   useEffect(() => {
@@ -50,13 +50,13 @@ export default function Trainer({ verbs, loading, enabledTenses, enabledPersons,
       setInput('')
       setFeedback(null)
       setCorrectAnswer(null)
-      setShowAnswer(false)
+      setWaitingForEnter(false)
     }
   }, [verbs, enabledTenses, enabledPersons])
 
   useEffect(() => {
-    if (!loading) inputRef.current?.focus()
-  }, [loading, index, feedback])
+    inputRef.current?.focus()
+  }, [index])
 
   const currentCard = queue[index] || null
 
@@ -64,36 +64,35 @@ export default function Trainer({ verbs, loading, enabledTenses, enabledPersons,
     setInput('')
     setFeedback(null)
     setCorrectAnswer(null)
-    setShowAnswer(false)
+    setWaitingForEnter(false)
     setIndex(i => {
       const next = i + 1
       if (next >= queue.length) {
-        // Reshuffle and restart
         const q = buildQueue(verbs, enabledTenses, enabledPersons)
         setQueue(q)
         return 0
       }
       return next
     })
-    setTimeout(() => inputRef.current?.focus(), 50)
+    setTimeout(() => inputRef.current?.focus(), 30)
   }, [queue, verbs, enabledTenses, enabledPersons])
 
   const handleSubmit = useCallback(() => {
     if (!currentCard) return
 
-    if (feedback) {
-      // Already answered — Enter moves to next
+    if (waitingForEnter) {
       advance()
       return
     }
 
+    if (feedback === 'correct') return
+
     if (!input.trim()) {
-      // Empty submit — show the answer
-      setShowAnswer(true)
       setCorrectAnswer(currentCard.answer)
       setFeedback('skipped')
       setStreak(0)
-      setSessionStats(s => ({ ...s, wrong: s.wrong + 1, total: s.total + 1 }))
+      setSessionStats(s => ({ ...s, wrong: s.wrong + 1 }))
+      setWaitingForEnter(true)
       return
     }
 
@@ -102,15 +101,15 @@ export default function Trainer({ verbs, loading, enabledTenses, enabledPersons,
 
     if (result === 'correct') {
       setStreak(s => s + 1)
-      setSessionStats(s => ({ ...s, correct: s.correct + 1, total: s.total + 1 }))
-      // Auto-advance after short delay on correct
-      setTimeout(advance, 500)
+      setSessionStats(s => ({ ...s, correct: s.correct + 1 }))
+      setTimeout(advance, 600)
     } else {
       setCorrectAnswer(currentCard.answer)
       setStreak(0)
-      setSessionStats(s => ({ ...s, wrong: s.wrong + 1, total: s.total + 1 }))
+      setSessionStats(s => ({ ...s, wrong: s.wrong + 1 }))
+      setWaitingForEnter(true)
     }
-  }, [currentCard, feedback, input, strictAccents, advance])
+  }, [currentCard, feedback, waitingForEnter, input, strictAccents, advance])
 
   const handleKeyDown = (e) => {
     if (e.key === 'Enter') {
@@ -121,7 +120,7 @@ export default function Trainer({ verbs, loading, enabledTenses, enabledPersons,
 
   if (loading) {
     return (
-      <div className="trainer-empty">
+      <div className="empty-state">
         <div className="spinner" />
         <p>Loading verbs...</p>
       </div>
@@ -130,63 +129,63 @@ export default function Trainer({ verbs, loading, enabledTenses, enabledPersons,
 
   if (verbs.length === 0) {
     return (
-      <div className="trainer-empty">
-        <p className="empty-icon">📚</p>
+      <div className="empty-state">
+        <div className="empty-icon">📚</div>
         <h2>No verbs yet</h2>
         <p>Add some verbs to get started.</p>
-        <button className="btn-primary" onClick={onGoToVerbs}>Add Verbs →</button>
+        <button className="btn-primary" onClick={onGoToVerbs}>Add verbs</button>
       </div>
     )
   }
 
   if (queue.length === 0) {
     return (
-      <div className="trainer-empty">
-        <p className="empty-icon">⚙️</p>
+      <div className="empty-state">
+        <div className="empty-icon">⚙️</div>
         <h2>Nothing to drill</h2>
-        <p>Enable at least one tense and one person form in Settings.</p>
+        <p>Enable at least one tense and one person in Settings.</p>
       </div>
     )
   }
 
   const tenseInfo = currentCard ? TENSES[currentCard.tenseKey] : null
-  const accuracy = sessionStats.total > 0
-    ? Math.round((sessionStats.correct / sessionStats.total) * 100)
-    : null
+  const total = sessionStats.correct + sessionStats.wrong
+  const accuracy = total > 0 ? Math.round((sessionStats.correct / total) * 100) : null
 
   return (
     <div className="trainer">
-      {/* Stats bar */}
-      <div className="stats-bar">
-        <div className="stat">
-          <span className="stat-label">streak</span>
-          <span className="stat-value streak">{streak}</span>
+      <div className="trainer-topbar">
+        <div className="topbar-stat">
+          <span className="topbar-label">Streak</span>
+          <span className="topbar-value" style={{ color: streak > 0 ? 'var(--green)' : undefined }}>{streak}</span>
         </div>
-        <div className="progress-pill">
-          {index + 1} / {queue.length}
+        <span className="topbar-progress">{index + 1} / {queue.length}</span>
+        <div className="topbar-stat" style={{ textAlign: 'right' }}>
+          <span className="topbar-label">Accuracy</span>
+          <span className="topbar-value">{accuracy !== null ? `${accuracy}%` : '—'}</span>
         </div>
-        {accuracy !== null && (
-          <div className="stat">
-            <span className="stat-label">accuracy</span>
-            <span className="stat-value">{accuracy}%</span>
-          </div>
-        )}
       </div>
 
-      {/* Card */}
+      <div className="progress-track">
+        <div className="progress-fill" style={{ width: `${((index + 1) / queue.length) * 100}%` }} />
+      </div>
+
       {currentCard && (
         <div className={`card ${feedback || ''}`}>
-          <div className="card-meta">
-            <span className="card-group">{tenseInfo?.group}</span>
-            <span className="card-tense">{tenseInfo?.label}</span>
+          <div className="card-tags">
+            <span className="tag">{tenseInfo?.group}</span>
+            <span className="tag">{tenseInfo?.label}</span>
           </div>
 
-          <div className="card-prompt">
-            <span className="card-person">{currentCard.personLabel}</span>
-            <span className="card-infinitive">{currentCard.infinitive}</span>
+          <div className="card-body">
+            <div className="card-person">{currentCard.personLabel}</div>
+            <div className="card-verb">{currentCard.infinitive}</div>
+            {currentCard.definition && (
+              <div className="card-definition">"{currentCard.definition}"</div>
+            )}
           </div>
 
-          <div className="input-row">
+          <div className="input-area">
             <input
               ref={inputRef}
               className={`conj-input ${feedback || ''}`}
@@ -194,7 +193,7 @@ export default function Trainer({ verbs, loading, enabledTenses, enabledPersons,
               value={input}
               onChange={e => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="conjugación..."
+              placeholder="type conjugation..."
               autoComplete="off"
               autoCorrect="off"
               autoCapitalize="off"
@@ -206,38 +205,34 @@ export default function Trainer({ verbs, loading, enabledTenses, enabledPersons,
               onClick={handleSubmit}
               tabIndex={-1}
             >
-              {feedback ? '→' : '✓'}
+              {waitingForEnter ? '→' : '↵'}
             </button>
           </div>
 
           {feedback === 'correct' && (
-            <div className="feedback correct">¡Correcto! ✓</div>
+            <div className="feedback-bar correct">✓ Correct</div>
           )}
           {feedback === 'accent_error' && (
-            <div className="feedback accent-error">
-              <span>Almost! Missing accent: <strong>{correctAnswer}</strong></span>
+            <div className="feedback-bar accent">
+              ⚠ Check accent — <strong>{correctAnswer}</strong>
             </div>
           )}
           {feedback === 'wrong' && (
-            <div className="feedback wrong">
-              <span>Answer: <strong>{correctAnswer}</strong></span>
+            <div className="feedback-bar wrong">
+              ✗ <strong>{correctAnswer}</strong>
             </div>
           )}
           {feedback === 'skipped' && (
-            <div className="feedback skipped">
-              <span>Skipped: <strong>{correctAnswer}</strong></span>
+            <div className="feedback-bar skipped">
+              <strong>{correctAnswer}</strong>
             </div>
-          )}
-
-          {feedback && feedback !== 'correct' && (
-            <div className="next-hint">Press Enter to continue</div>
           )}
         </div>
       )}
 
-      <div className="keyboard-hints">
-        <kbd>Enter</kbd> submit / next &nbsp;·&nbsp; <kbd>Enter</kbd> on empty = skip
-      </div>
+      <p className="hint-text">
+        {waitingForEnter ? 'Press Enter to continue →' : 'Enter to submit · empty Enter to skip'}
+      </p>
     </div>
   )
 }

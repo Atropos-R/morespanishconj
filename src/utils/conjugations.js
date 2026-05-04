@@ -225,3 +225,29 @@ export function checkAnswer(input, correct, strict = true) {
   
   return 'wrong'
 }
+
+// Fetch English definition for a verb from Wiktionary dictionary API
+export async function fetchDefinition(infinitive) {
+  try {
+    const res = await fetch(`https://en.wiktionary.org/api/rest_v1/page/definition/${encodeURIComponent(infinitive)}`)
+    if (!res.ok) return null
+    const data = await res.json()
+    
+    // Look in Spanish section
+    const spanish = data.es || data.ES
+    if (!spanish) return null
+    
+    for (const entry of spanish) {
+      if (entry.partOfSpeech?.toLowerCase().includes('verb')) {
+        const def = entry.definitions?.[0]?.definition
+        if (def) {
+          // Strip HTML tags
+          return def.replace(/<[^>]+>/g, '').trim()
+        }
+      }
+    }
+    return null
+  } catch {
+    return null
+  }
+}

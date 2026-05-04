@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { fetchConjugations } from '../utils/conjugations'
+import { fetchConjugations, fetchDefinition } from '../utils/conjugations'
 import { addVerb, deleteVerb } from '../utils/supabase'
 
 export default function VerbManager({ verbs, onRefresh }) {
@@ -19,8 +19,11 @@ export default function VerbManager({ verbs, onRefresh }) {
     setSuccess(null)
 
     try {
-      const conjugations = await fetchConjugations(infinitive)
-      await addVerb(infinitive, conjugations)
+      const [conjugations, definition] = await Promise.all([
+        fetchConjugations(infinitive),
+        fetchDefinition(infinitive),
+      ])
+      await addVerb(infinitive, conjugations, definition)
       setSuccess(`"${infinitive}" added!`)
       setInput('')
       onRefresh()
@@ -47,9 +50,7 @@ export default function VerbManager({ verbs, onRefresh }) {
     <div className="verb-manager">
       <div className="vm-header">
         <h2>Verb Library</h2>
-        <p className="vm-subtitle">
-          {verbs.length} verb{verbs.length !== 1 ? 's' : ''} in pool
-        </p>
+        <p className="vm-subtitle">{verbs.length} verb{verbs.length !== 1 ? 's' : ''} in pool</p>
       </div>
 
       <form className="add-verb-form" onSubmit={handleAdd}>
@@ -66,7 +67,7 @@ export default function VerbManager({ verbs, onRefresh }) {
           disabled={loading}
         />
         <button className="btn-primary" type="submit" disabled={loading || !input.trim()}>
-          {loading ? '...' : '+ Add'}
+          {loading ? 'Loading...' : '+ Add'}
         </button>
       </form>
 
@@ -75,18 +76,19 @@ export default function VerbManager({ verbs, onRefresh }) {
 
       <div className="verb-list">
         {verbs.length === 0 && (
-          <div className="verb-list-empty">
-            No verbs yet. Type an infinitive above to add one.
-          </div>
+          <div className="verb-list-empty">No verbs yet. Type an infinitive above.</div>
         )}
         {verbs.map(verb => (
           <div key={verb.infinitive} className="verb-item">
-            <span className="verb-name">{verb.infinitive}</span>
+            <div className="verb-item-info">
+              <span className="verb-name">{verb.infinitive}</span>
+              {verb.definition && <span className="verb-def">{verb.definition}</span>}
+            </div>
             <button
               className="verb-delete"
               onClick={() => handleDelete(verb.infinitive)}
               disabled={deleting === verb.infinitive}
-              title="Remove verb"
+              title="Remove"
             >
               {deleting === verb.infinitive ? '...' : '×'}
             </button>
